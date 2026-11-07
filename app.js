@@ -28,7 +28,17 @@ const STYLES = [
   { id: 'amber', name: '앰버', frame: { color: 0x6e3f17, roughness: 0.22, opacity: 0.9 }, lens: { color: 0x5a3a12, opacity: 0.45 } },
 ];
 
+const APP_VERSION = 'v3';
 const $ = (id) => document.getElementById(id);
+$('ver').textContent = APP_VERSION;
+
+// 화면 진단용: 오류를 좌상단에 표시
+const errors = [];
+const pushErr = (m) => { if (/^(INFO|[IW]\d{4})/.test(String(m))) return; errors.push(String(m).slice(0, 80)); if (errors.length > 3) errors.shift(); };
+window.addEventListener('error', (e) => pushErr(e.message));
+window.addEventListener('unhandledrejection', (e) => pushErr(e.reason?.message || e.reason));
+const _cerr = console.error.bind(console);
+console.error = (...args) => { pushErr(args.map(String).join(' ')); _cerr(...args); };
 const video = $('video'), canvas = $('gl'), statusEl = $('status'), hintEl = $('hint');
 
 function setStatus(text, kind = '') { statusEl.textContent = text; statusEl.className = 'pill ' + kind; }
@@ -40,7 +50,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setClearColor(0x0d0c0b, 1);
 canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); setStatus("그래픽 오류: 페이지를 새로고침해 주세요", "warn"); });
 const scene = new THREE.Scene();
-scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+try { scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; }
+catch (e) { pushErr('env: ' + e.message); }
 const key = new THREE.DirectionalLight(0xffffff, 1.2); key.position.set(0.3, 1, 1); scene.add(key);
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 
@@ -134,8 +145,10 @@ async function startCamera() {
   if (!video.videoWidth) await new Promise((r) => video.addEventListener('loadedmetadata', r, { once: true }));
 }
 
+let sizeW = 0, sizeH = 0;
 function resize() {
   const w = video.videoWidth, h = video.videoHeight;
+  sizeW = w; sizeH = h;
   renderer.setSize(w, h, false);
   camera.left = 0; camera.right = w; camera.top = 0; camera.bottom = -h;
   camera.updateProjectionMatrix();
@@ -154,7 +167,7 @@ function lmPx(lm, i, w, h) { return new THREE.Vector3(lm[i].x * w, -lm[i].y * h,
 function tick() {
   requestAnimationFrame(tick);
   if (video.readyState < 2) return;
-  if (video.videoWidth !== renderer.domElement.width / renderer.getPixelRatio()) resize();
+  if (video.videoWidth !== sizeW || video.videoHeight !== sizeH) resize();
 
   if (video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
@@ -188,6 +201,13 @@ function tick() {
   const now = performance.now();
   if (now - fpsT > 1000) {
     const fps = Math.round((fpsN * 1000) / (now - fpsT)); fpsN = 0; fpsT = now;
+    const gl = renderer.getContext();
+    $('diag').textContent =
+      `영상 ${sizeW}x${sizeH} · 캔버스 ${canvas.width}x${canvas.height}\n` +
+      `모델 ${frameMats.length + lensMats.length}재질 · draw ${renderer.info.render.calls} · tri ${renderer.info.render.triangles}\n` +
+      `위치 ${anchor.position.toArray().map((v) => v.toFixed(0)).join(',')} · 크기 ${anchor.scale.x.toFixed(0)}\n` +
+      `GPU ${(gl.getParameter(gl.getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL ?? gl.RENDERER) || '').toString().slice(0, 40)}` +
+      (errors.length ? '\n오류: ' + errors.join(' / ') : '');
     setStatus(anchor.visible ? `인식 중 · ${fps}fps · ${mode}` : `얼굴 찾는 중 · ${fps}fps`, anchor.visible ? 'ok' : 'warn');
   }
 }
