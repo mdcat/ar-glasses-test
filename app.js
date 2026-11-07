@@ -37,7 +37,8 @@ function showError(text) { const e = $('err'); e.textContent = text; e.hidden = 
 // ── Three.js 장면 ───────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setClearColor(0x000000, 0);
+renderer.setClearColor(0x0d0c0b, 1);
+canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); setStatus("그래픽 오류: 페이지를 새로고침해 주세요", "warn"); });
 const scene = new THREE.Scene();
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
 const key = new THREE.DirectionalLight(0xffffff, 1.2); key.position.set(0.3, 1, 1); scene.add(key);
@@ -46,6 +47,16 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 // 화면 픽셀 좌표계 그대로 쓰는 직교 카메라 (x 오른쪽, y 위, z 카메라 쪽)
 const camera = new THREE.OrthographicCamera(0, 1, 0, -1, 1, 40000);
 camera.position.z = 20000;
+
+// 카메라 영상을 <video> 위에 겹치지 않고 같은 WebGL 캔버스 배경으로 그림.
+// (삼성 인터넷 등 일부 브라우저는 <video>를 최상단 레이어로 올려 위의 캔버스를 가림)
+const videoTex = new THREE.VideoTexture(video);
+videoTex.colorSpace = THREE.SRGBColorSpace;
+const bgMat = new THREE.MeshBasicMaterial({ map: videoTex, depthWrite: false, depthTest: false, toneMapped: false });
+const bg = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), bgMat);
+bg.renderOrder = -10;
+bg.position.z = -15000;
+scene.add(bg);
 
 const anchor = new THREE.Group();     // 얼굴 위치/회전/크기를 받는 그룹
 const fit = new THREE.Group();        // 모델 미세 보정(오프셋, 기울기)
@@ -128,6 +139,8 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.left = 0; camera.right = w; camera.top = 0; camera.bottom = -h;
   camera.updateProjectionMatrix();
+  bg.scale.set(w, h, 1);
+  bg.position.set(w / 2, -h / 2, -15000);
 }
 
 // ── 매 프레임 ───────────────────────────────────────────────
