@@ -28,13 +28,13 @@ const STYLES = [
   { id: 'amber', name: '앰버', frame: { color: 0x6e3f17, roughness: 0.22, opacity: 0.9 }, lens: { color: 0x5a3a12, opacity: 0.45 } },
 ];
 
-const APP_VERSION = 'v3';
+const APP_VERSION = '0.04';
 const $ = (id) => document.getElementById(id);
 $('ver').textContent = APP_VERSION;
 
 // 화면 진단용: 오류를 좌상단에 표시
 const errors = [];
-const pushErr = (m) => { if (/^(INFO|[IW]\d{4})/.test(String(m))) return; errors.push(String(m).slice(0, 80)); if (errors.length > 3) errors.shift(); };
+const pushErr = (m) => { if (/^(INFO|[IW]\d{4})/.test(String(m))) return; errors.push(String(m).slice(0, 300)); if (errors.length > 3) errors.shift(); };
 window.addEventListener('error', (e) => pushErr(e.message));
 window.addEventListener('unhandledrejection', (e) => pushErr(e.reason?.message || e.reason));
 const _cerr = console.error.bind(console);
@@ -123,12 +123,15 @@ function buildChips() {
 
 // ── 얼굴 추적 ───────────────────────────────────────────────
 let landmarker;
-async function createLandmarker() {
-  const fileset = await FilesetResolver.forVisionTasks(CONFIG.wasmBase);
+let fileset;
+const forceCPU = new URLSearchParams(location.search).has('cpu');
+async function createLandmarker(only) {
+  fileset ||= await FilesetResolver.forVisionTasks(CONFIG.wasmBase);
   const opts = (delegate) => ({
     baseOptions: { modelAssetPath: CONFIG.faceModel, delegate },
     runningMode: 'VIDEO', numFaces: 1, outputFacialTransformationMatrixes: true,
   });
+  if (only === 'CPU' || forceCPU) return { lm: await FaceLandmarker.createFromOptions(fileset, opts('CPU')), mode: 'CPU' };
   try { return { lm: await FaceLandmarker.createFromOptions(fileset, opts('GPU')), mode: 'GPU' }; }
   catch (e) { console.warn('GPU 모드 실패, CPU로 전환', e); return { lm: await FaceLandmarker.createFromOptions(fileset, opts('CPU')), mode: 'CPU' }; }
 }
@@ -161,6 +164,23 @@ const M = new THREE.Matrix4(), qT = new THREE.Quaternion(), _p = new THREE.Vecto
 const posT = new THREE.Vector3();
 let lastVideoTime = -1, hasPose = false, lostFrames = 0;
 let fpsT = performance.now(), fpsN = 0, mode = '';
+let badFrames = 0, switching = false, lastRaw = '';
+
+// 일부 기기(예: 갤럭시 + 삼성 인터넷)는 GPU 모드가 오류 나면서 비정상 값을 줌 → CPU 모드로 자동 전환
+async function fallbackToCPU(reason) {
+  if (switching || mode !== 'GPU') return;
+  switching = true; pushErr('GPU 결과 비정상, CPU로 전환: ' + reason);
+  setStatus('CPU 모드로 전환 중', 'warn');
+  try {
+    const old = landmarker;
+    const { lm } = await createLandmarker('CPU');
+    landmarker = lm; mode = 'CPU(자동)';
+    try { old.close(); } catch {}
+  } catch (e) { pushErr('CPU 전환 실패: ' + e.message); }
+  badFrames = 0; hasPose = false; switching = false;
+}
+
+const finite = (v) => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 
 function lmPx(lm, i, w, h) { return new THREE.Vector3(lm[i].x * w, -lm[i].y * h, -lm[i].z * w); }
 
@@ -171,14 +191,28 @@ function tick() {
 
   if (video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
-    const res = landmarker.detectForVideo(video, performance.now());
+    if (switching) { renderer.render(scene, camera); return; }
+    let res;
+    try { res = landmarker.detectForVideo(video, performance.now()); }
+    catch (e) { pushErr('detect: ' + e.message); if (++badFrames > 10) fallbackToCPU('detect 예외'); renderer.render(scene, camera); return; }
     const w = video.videoWidth, h = video.videoHeight;
+    let ok = false, L, R, mid, scale;
     if (res.faceLandmarks?.length && res.facialTransformationMatrixes?.length) {
       const lm = res.faceLandmarks[0];
-      const L = lmPx(lm, 33, w, h), R = lmPx(lm, 263, w, h), mid = lmPx(lm, 168, w, h);
-      const scale = L.distanceTo(R) / CONFIG.eyeCornerDistM;    // 픽셀/미터
+      L = lmPx(lm, 33, w, h); R = lmPx(lm, 263, w, h); mid = lmPx(lm, 168, w, h);
+      scale = L.distanceTo(R) / CONFIG.eyeCornerDistM;    // 픽셀/미터
+      lastRaw = `168=(${lm[168].x.toPrecision(3)}, ${lm[168].y.toPrecision(3)}, ${lm[168].z.toPrecision(3)})`;
       M.fromArray(res.facialTransformationMatrixes[0].data);
       M.decompose(_p, qT, _s);
+      // 값 검증: 화면 근처의 유한한 좌표, 상식적인 크기, 정상 회전
+      ok = finite(L) && finite(R) && finite(mid) &&
+        Math.abs(lm[168].x - 0.5) < 1.5 && Math.abs(lm[168].y - 0.5) < 1.5 &&
+        scale > w * 0.3 && scale < w * 20 &&
+        Number.isFinite(qT.x + qT.y + qT.z + qT.w);
+      if (!ok && ++badFrames > 10) fallbackToCPU('좌표 이상');
+      if (ok) badFrames = 0;
+    }
+    if (ok) {
       posT.copy(mid);
 
       if (!hasPose) { anchor.position.copy(posT); anchor.quaternion.copy(qT); anchor.scale.setScalar(scale); hasPose = true; }
@@ -205,9 +239,10 @@ function tick() {
     $('diag').textContent =
       `영상 ${sizeW}x${sizeH} · 캔버스 ${canvas.width}x${canvas.height}\n` +
       `모델 ${frameMats.length + lensMats.length}재질 · draw ${renderer.info.render.calls} · tri ${renderer.info.render.triangles}\n` +
+      `원본 ${lastRaw}\n` +
       `위치 ${anchor.position.toArray().map((v) => v.toFixed(0)).join(',')} · 크기 ${anchor.scale.x.toFixed(0)}\n` +
       `GPU ${(gl.getParameter(gl.getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL ?? gl.RENDERER) || '').toString().slice(0, 40)}` +
-      (errors.length ? '\n오류: ' + errors.join(' / ') : '');
+      (errors.length ? '\n오류: ' + errors.join('\n') : '');
     setStatus(anchor.visible ? `인식 중 · ${fps}fps · ${mode}` : `얼굴 찾는 중 · ${fps}fps`, anchor.visible ? 'ok' : 'warn');
   }
 }
@@ -227,6 +262,7 @@ $('start').addEventListener('click', async () => {
     $('gate').hidden = true; $('bar').hidden = false;
     setStatus('얼굴 찾는 중', 'warn');
     tick();
+    setupDiagCopy();
   } catch (e) {
     console.error(e);
     const msg = {
@@ -239,6 +275,24 @@ $('start').addEventListener('click', async () => {
     showError(msg);
   }
 });
+
+// 진단 텍스트를 탭하면 클립보드로 복사
+function setupDiagCopy() {
+  const el = $('diag');
+  el.addEventListener('click', async () => {
+    const text = `${APP_VERSION} · ${mode}\n${el.textContent}\nUA ${navigator.userAgent}`;
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; } catch {}
+    if (!copied) {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      try { copied = document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    $('ver').textContent = `${APP_VERSION} · ${copied ? '진단 복사됨' : '복사 실패'}`;
+    setTimeout(() => { $('ver').textContent = APP_VERSION; }, 1500);
+  });
+}
 
 // 디버그용 노출 (콘솔에서 window.__ar 로 확인)
 window.__ar = { anchor, CONFIG, get visible() { return anchor.visible; } };

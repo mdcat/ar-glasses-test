@@ -29,11 +29,11 @@
   #gl { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .mirror #gl { transform: scaleX(-1); }
 
-  .top { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  .top { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
     padding: calc(env(safe-area-inset-top, 0px) + 12px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); pointer-events: none; }
-  .brand { display: grid; gap: 2px; font-weight: 700; letter-spacing: .02em; font-size: 15px; text-shadow: 0 1px 8px rgba(0,0,0,.6); }
-  .diag { font-weight: 400; font-size: 11px; line-height: 1.35; color: var(--ink-dim); white-space: pre; font-family: ui-monospace, Menlo, monospace; }
-  .pill { background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line);
+  .brand { flex: 1; min-width: 0; display: grid; gap: 2px; font-weight: 700; letter-spacing: .02em; font-size: 15px; text-shadow: 0 1px 8px rgba(0,0,0,.6); }
+  .diag { font-weight: 400; font-size: 11px; line-height: 1.35; color: var(--ink-dim); white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; pointer-events: auto; cursor: pointer; max-height: 45vh; overflow: hidden; }
+  .pill { flex: 0 0 auto; background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line);
     border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
   .pill.ok { color: var(--ink); }
   .pill.warn { color: var(--accent); }
@@ -81,7 +81,7 @@
   </div>
 
   <div class="top">
-    <span class="brand"><span id="ver">v3 (html)</span><span id="diag" class="diag"></span></span>
+    <span class="brand"><span id="ver">0.04 (html)</span><span id="diag" class="diag"></span></span>
     <span id="status" class="pill">준비 중</span>
   </div>
 
@@ -106,6 +106,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=3"></script>
+  <script type="module" src="./app.js?v=0.04"></script>
 </body>
 </html>
