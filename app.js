@@ -28,7 +28,7 @@ const STYLES = [
   { id: 'amber', name: '앰버', frame: { color: 0x6e3f17, roughness: 0.22, opacity: 0.9 }, lens: { color: 0x5a3a12, opacity: 0.45 } },
 ];
 
-const APP_VERSION = '0.04';
+const APP_VERSION = '0.05';
 const $ = (id) => document.getElementById(id);
 $('ver').textContent = APP_VERSION;
 
@@ -276,10 +276,11 @@ $('start').addEventListener('click', async () => {
   }
 });
 
-// 진단 텍스트를 탭하면 클립보드로 복사
+// 진단 텍스트: 기본 5줄만 표시, 탭하면 펼치기/접기 + 클립보드 복사
 function setupDiagCopy() {
   const el = $('diag');
   el.addEventListener('click', async () => {
+    el.classList.toggle('open');
     const text = `${APP_VERSION} · ${mode}\n${el.textContent}\nUA ${navigator.userAgent}`;
     let copied = false;
     try { await navigator.clipboard.writeText(text); copied = true; } catch {}
